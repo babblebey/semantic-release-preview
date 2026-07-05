@@ -23,6 +23,10 @@ on:
         required: false
         type: string
         default: https://semantic-release.org/favicon.svg
+    secrets:
+      github_token:
+        description: Token used for repository API access and semantic-release auth checks
+        required: false
 
 concurrency:
   group: semantic-release-preview-${{ github.repository }}-${{ github.event.pull_request.number }}
