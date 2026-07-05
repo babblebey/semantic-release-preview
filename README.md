@@ -1,8 +1,8 @@
 # semantic-release-preview
 
-Reusable GitHub Actions workflow that predicts what semantic-release would publish for a pull request before merge.
+Reusable GitHub Actions workflow that predicts what [semantic-release](https://github.com/semantic-release/semantic-release) would publish for a pull request before merge.
 
-It runs semantic-release in dry-run mode and comments on the PR with predicted next versions for:
+It runs [semantic-release](https://github.com/semantic-release/semantic-release) in **dry-run mode** and comments on the pull request with predicted next versions for based on the github merge strategies:
 
 - Merge commit
 - Squash and merge
