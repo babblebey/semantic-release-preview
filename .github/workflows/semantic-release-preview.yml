@@ -1,0 +1,233 @@
+name: Semantic Release Preview (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      semantic_release_command:
+        description: Command used to run semantic-release in dry-run mode
+        required: false
+        type: string
+        default: npx semantic-release
+      node_version:
+        description: Node.js version for setup-node
+        required: false
+        type: string
+        default: lts/*
+      comment_marker:
+        description: Hidden marker used to find and update existing bot comment
+        required: false
+        type: string
+        default: <!-- semantic-release-dry-run -->
+      icon_url:
+        description: Icon URL rendered in the preview heading
+        required: false
+        type: string
+        default: https://semantic-release.org/favicon.svg
+
+concurrency:
+  group: semantic-release-preview-${{ github.repository }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  release-dry-run:
+    if: github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout merge commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          ref: refs/pull/${{ github.event.pull_request.number }}/merge
+
+      - name: Set local branch to PR base name
+        run: |
+          git checkout -B "${{ github.event.pull_request.base.ref }}"
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          cache: npm
+          node-version: ${{ inputs.node_version }}
+
+      - name: Install dependencies
+        run: npm clean-install
+
+      - name: Create semantic-release dry-run helper
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/semantic-release-dry-run.sh" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          branch_ref="$1"
+          context_label="$2"
+          semantic_release_command="$3"
+          output_file="$(mktemp)"
+          event_file="$(mktemp)"
+
+          printf '{"ref":"refs/heads/%s"}\n' "$branch_ref" > "$event_file"
+          echo "$context_label: GITHUB_EVENT_NAME=push GITHUB_REF=refs/heads/$branch_ref" >&2
+
+          set +e
+          GITHUB_EVENT_NAME=push \
+          GITHUB_REF="refs/heads/$branch_ref" \
+          GITHUB_REF_NAME="$branch_ref" \
+          GITHUB_BASE_REF= \
+          GITHUB_HEAD_REF= \
+          GITHUB_EVENT_PATH="$event_file" \
+          eval "$semantic_release_command --dry-run --no-ci" \
+            2>&1 | tee "$output_file" >&2
+          release_status="${PIPESTATUS[0]}"
+          set -e
+
+          if [ "$release_status" -ne 0 ]; then
+            if grep -Eq 'There are no relevant changes, so no new version is released\.|No release was published\.' "$output_file"; then
+              release_status=0
+            else
+              exit "$release_status"
+            fi
+          fi
+
+          next_version="$(grep -oE 'next release version is [^[:space:]]+' "$output_file" | tail -n 1 | awk '{print $NF}' || true)"
+
+          if [ -z "$next_version" ]; then
+            next_version="none"
+          fi
+
+          printf '%s\n' "$next_version"
+          EOF
+
+          chmod +x "$RUNNER_TEMP/semantic-release-dry-run.sh"
+
+      - name: Dry run semantic-release from rebase merge (PR commits)
+        id: rebase_dry_run
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.github_token || github.token }}
+          SEMANTIC_RELEASE_COMMAND: ${{ inputs.semantic_release_command }}
+        run: |
+          branch_ref="${{ github.event.pull_request.base.ref }}"
+
+          next_version="$($RUNNER_TEMP/semantic-release-dry-run.sh "$branch_ref" "semantic-release dry-run context" "$SEMANTIC_RELEASE_COMMAND")"
+
+          echo "next_version=$next_version" >> "$GITHUB_OUTPUT"
+
+      - name: Dry run semantic-release for squash merge
+        id: squash_dry_run
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.github_token || github.token }}
+          SEMANTIC_RELEASE_COMMAND: ${{ inputs.semantic_release_command }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          branch_ref="${{ github.event.pull_request.base.ref }}"
+
+          git fetch --no-tags --prune origin "+refs/heads/$branch_ref:refs/remotes/origin/$branch_ref"
+          git checkout -B "$branch_ref" "refs/remotes/origin/$branch_ref"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          commit_args=(-m "$PR_TITLE")
+          if [ -n "$PR_BODY" ]; then
+            commit_args+=(-m "$PR_BODY")
+          fi
+
+          git commit --allow-empty "${commit_args[@]}"
+
+          next_version="$($RUNNER_TEMP/semantic-release-dry-run.sh "$branch_ref" "semantic-release dry-run squash context" "$SEMANTIC_RELEASE_COMMAND")"
+
+          echo "next_version=$next_version" >> "$GITHUB_OUTPUT"
+
+      - name: Dry run semantic-release for merge commit
+        id: merge_commit_dry_run
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.github_token || github.token }}
+          SEMANTIC_RELEASE_COMMAND: ${{ inputs.semantic_release_command }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          branch_ref="${{ github.event.pull_request.base.ref }}"
+
+          git fetch --no-tags --prune origin "+refs/pull/${{ github.event.pull_request.number }}/merge:refs/remotes/origin/pr/${{ github.event.pull_request.number }}/merge"
+          git checkout -B "$branch_ref" "refs/remotes/origin/pr/${{ github.event.pull_request.number }}/merge"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          commit_args=(-m "$PR_TITLE")
+          if [ -n "$PR_BODY" ]; then
+            commit_args+=(-m "$PR_BODY")
+          fi
+
+          # Simulate repos that use PR title/body in merge commit messages by appending one message-only commit.
+          git commit --allow-empty "${commit_args[@]}"
+
+          next_version="$($RUNNER_TEMP/semantic-release-dry-run.sh "$branch_ref" "semantic-release dry-run merge-commit-message context" "$SEMANTIC_RELEASE_COMMAND")"
+
+          echo "next_version=$next_version" >> "$GITHUB_OUTPUT"
+
+      - name: Comment predicted version
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v8.0.0
+        env:
+          COMMENT_MARKER: ${{ inputs.comment_marker }}
+          ICON_URL: ${{ inputs.icon_url }}
+          CURRENT_NEXT_VERSION: ${{ steps.rebase_dry_run.outputs.next_version }}
+          SQUASH_NEXT_VERSION: ${{ steps.squash_dry_run.outputs.next_version }}
+          MERGE_COMMIT_NEXT_VERSION: ${{ steps.merge_commit_dry_run.outputs.next_version }}
+        with:
+          github-token: ${{ secrets.github_token || github.token }}
+          script: |
+            const marker = process.env.COMMENT_MARKER;
+            const iconUrl = process.env.ICON_URL;
+            const currentNextVersion = process.env.CURRENT_NEXT_VERSION;
+            const squashNextVersion = process.env.SQUASH_NEXT_VERSION;
+            const mergeCommitNextVersion = process.env.MERGE_COMMIT_NEXT_VERSION;
+            const issue_number = context.issue.number;
+
+            const isNoRelease = (value) => !value || value === 'none';
+            const allNoRelease = [currentNextVersion, squashNextVersion, mergeCommitNextVersion].every(isNoRelease);
+
+            const normalizeVersion = (value) => (value && value !== 'none' ? `**${value}**` : '**No release**');
+
+            const mergeCommitCell = normalizeVersion(mergeCommitNextVersion);
+            const squashCell = normalizeVersion(squashNextVersion);
+            const rebaseCell = normalizeVersion(currentNextVersion);
+
+            const body = allNoRelease
+              ? `${marker}\n## <img src="${iconUrl}" alt="semantic-release" width="18" height="18" /> Semantic Release - Release Preview\n\n### 🚨 No release expected. \n\nMerging this pull request is not expected to produce a new version or publish a release. If that is intentional, you're good to merge. **If a release is expected**, update commit messages (or PR title/body for squash and merge) to follow your release commit convention.`
+              : `${marker}\n## <img src="${iconUrl}" alt="semantic-release" width="18" height="18" /> Semantic Release - Release Preview\n\n### 🚀 Release expected. \n\nIf this pull request is merged, semantic-release is expected to produce the following next versions by merge strategy.\n\n| Merge Strategy | Expected Next Version |\n|---|---|\n| Merge Commit | ${mergeCommitCell} |\n| Squash and Merge | ${squashCell} |\n| Rebase and Merge | ${rebaseCell} |\n\n> [!NOTE]\n> These predictions can differ because each merge strategy changes the final commit history that semantic-release analyzes:\n> - **Rebase and Merge** keeps individual PR commits, so their Conventional Commit messages directly drive the version bump.\n> - **Merge Commit** adds a merge commit on top. This preview assumes the PR title/description are used as the default merge commit message, so that message can influence the outcome if it includes release keywords.\n> - **Squash and Merge** replaces all PR commits with one commit, so the PR title/body (if used as the squash message) become the primary release signal.\n>\n> To keep outcomes predictable, use Conventional Commit format consistently in commit messages and PR title/body.`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+            });
+
+            const existing = comments.find((comment) =>
+              comment.user?.type === 'Bot' && comment.body?.includes(marker)
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number,
+                body,
+              });
+            }
