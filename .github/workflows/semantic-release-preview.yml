@@ -24,7 +24,7 @@ on:
         type: string
         default: https://semantic-release.org/favicon.svg
     secrets:
-      github_token:
+      gh_token:
         description: Token used for repository API access and semantic-release auth checks
         required: false
 
@@ -113,7 +113,7 @@ jobs:
         id: rebase_dry_run
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.github_token || github.token }}
+          GITHUB_TOKEN: ${{ secrets.gh_token || github.token }}
           SEMANTIC_RELEASE_COMMAND: ${{ inputs.semantic_release_command }}
         run: |
           branch_ref="${{ github.event.pull_request.base.ref }}"
@@ -126,7 +126,7 @@ jobs:
         id: squash_dry_run
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.github_token || github.token }}
+          GITHUB_TOKEN: ${{ secrets.gh_token || github.token }}
           SEMANTIC_RELEASE_COMMAND: ${{ inputs.semantic_release_command }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
@@ -154,7 +154,7 @@ jobs:
         id: merge_commit_dry_run
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.github_token || github.token }}
+          GITHUB_TOKEN: ${{ secrets.gh_token || github.token }}
           SEMANTIC_RELEASE_COMMAND: ${{ inputs.semantic_release_command }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
@@ -188,7 +188,7 @@ jobs:
           SQUASH_NEXT_VERSION: ${{ steps.squash_dry_run.outputs.next_version }}
           MERGE_COMMIT_NEXT_VERSION: ${{ steps.merge_commit_dry_run.outputs.next_version }}
         with:
-          github-token: ${{ secrets.github_token || github.token }}
+          github-token: ${{ secrets.gh_token || github.token }}
           script: |
             const marker = process.env.COMMENT_MARKER;
             const iconUrl = process.env.ICON_URL;

@@ -64,7 +64,7 @@ jobs:
 	release-dry-run:
 		uses: babblebey/semantic-release-preview/.github/workflows/semantic-release-preview.yml@main
 		secrets:
-			github_token: ${{ secrets.GITHUB_TOKEN }}
+			gh_token: ${{ secrets.GITHUB_TOKEN }}
 		with:
 			semantic_release_command: npx semantic-release
 ```
@@ -86,7 +86,7 @@ The reusable workflow supports these `with:` inputs:
 
 Pass this in `jobs.<job>.secrets`:
 
-- `github_token` (optional)
+- `gh_token` (optional)
 	- Token used for API calls and semantic-release auth checks
 	- If omitted, the reusable workflow falls back to `github.token`
 
