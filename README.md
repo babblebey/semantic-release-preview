@@ -99,7 +99,7 @@ Pass this in `jobs.<job>.secrets`:
 
 ## Custom semantic-release CLI
 
-If your project uses a different CLI package, pass it explicitly:
+If your project uses a different semantic-release CLI package, pass it explicitly:
 
 ```yaml
 with:
